@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta
 import traceback
 import tw_screener
+import tw_data_helper
 import time
 import requests
 from requests.adapters import HTTPAdapter
@@ -267,24 +268,94 @@ def get_stock_analysis(ticker: str):
     try:
         print(f"[Analysis] Starting analysis for: {ticker}")
 
-        # Use safe getter with retries
-        stock, info = get_ticker_info_safe(ticker)
+        # 檢查是否為台股，優先使用台灣證交所 API
+        is_tw = tw_data_helper.is_tw_stock(ticker)
 
-        if not stock or not info:
-            print(f"[Analysis] Failed to get data for {ticker}")
-            return {"error": f"無法獲取 '{ticker}' 的資料。請確認：\n• 台股代號需加 .TW（例：2330.TW）\n• 美股直接輸入代號（例：AAPL）\n• 代號是否正確"}
+        if is_tw:
+            print(f"[Analysis] Detected TW stock, using TWSE API first")
+            tw_data = tw_data_helper.get_tw_stock_info(ticker)
 
-        # Check if info is valid
-        if len(info) < 5:
-            print(f"[Analysis] Insufficient data for {ticker}")
-            return {"error": f"'{ticker}' 資料不完整，可能已下市或代號錯誤"}
+            if tw_data:
+                print(f"[Analysis] Successfully got TW data from TWSE API")
+                # 使用台灣證交所資料建立基本info結構
+                info = {
+                    "symbol": tw_data["code"],
+                    "longName": tw_data["name"],
+                    "shortName": tw_data["name"],
+                    "currentPrice": tw_data["price"],
+                    "regularMarketPrice": tw_data["price"],
+                    "currency": "TWD",
+                    "sector": "台股",
+                    "industry": "待分類",
+                    "country": "Taiwan",
+                    "exchange": "TPE",
+                    "trailingPE": tw_data.get("pe"),
+                    "priceToBook": tw_data.get("pb"),
+                    "dividendYield": tw_data.get("div_yield") / 100 if tw_data.get("div_yield") else None,
+                    "previousClose": tw_data["price"] - (tw_data["price"] * (tw_data.get("change_pct", 0) / 100)) if tw_data.get("change_pct") else tw_data["price"],
+                    "longBusinessSummary": tw_data.get("description", ""),
+                    # 預設值 for buffett scoring
+                    "returnOnEquity": None,
+                    "grossMargins": None,
+                    "debtToEquity": None,
+                    "freeCashflow": None,
+                    "operatingMargins": None,
+                    "marketCap": tw_data.get("market_cap"),
+                }
 
-        if not info.get("regularMarketPrice") and not info.get("currentPrice"):
-            print(f"[Analysis] No price data for {ticker}")
-            return {"error": f"'{ticker}' 無價格資料，可能已停牌或下市"}
+                # 嘗試用 yfinance 補充資料（但不強求）
+                try:
+                    stock, yf_info = get_ticker_info_safe(ticker, max_retries=1)
+                    if yf_info and len(yf_info) > 5:
+                        print(f"[Analysis] Enriching with yfinance data")
+                        # 補充財務指標
+                        info["returnOnEquity"] = yf_info.get("returnOnEquity")
+                        info["grossMargins"] = yf_info.get("grossMargins")
+                        info["debtToEquity"] = yf_info.get("debtToEquity")
+                        info["freeCashflow"] = yf_info.get("freeCashflow")
+                        info["operatingMargins"] = yf_info.get("operatingMargins")
+                        info["sector"] = yf_info.get("sector", info["sector"])
+                        info["industry"] = yf_info.get("industry", info["industry"])
+                        if yf_info.get("longBusinessSummary"):
+                            info["longBusinessSummary"] = yf_info.get("longBusinessSummary")
+                except Exception as e:
+                    print(f"[Analysis] Could not enrich with yfinance (OK): {e}")
 
-        name = info.get("longName") or info.get("shortName") or ticker
-        print(f"[Analysis] Successfully got data for: {name}")
+                stock = None  # 不使用 yfinance stock object
+                name = info["longName"]
+                print(f"[Analysis] Using TWSE data for: {name}")
+
+            else:
+                print(f"[Analysis] TWSE API failed, falling back to yfinance")
+                # Fallback to yfinance
+                stock, info = get_ticker_info_safe(ticker)
+
+                if not stock or not info or len(info) < 5:
+                    return {"error": f"無法獲取 '{ticker}' 的資料。\n台灣證交所API和Yahoo Finance都無法獲取資料。\n請確認：\n• 代號格式：2330.TW\n• 股票是否已下市"}
+
+                name = info.get("longName") or info.get("shortName") or ticker
+                print(f"[Analysis] Using yfinance data for: {name}")
+
+        else:
+            # 非台股，使用 yfinance
+            print(f"[Analysis] Non-TW stock, using yfinance")
+            stock, info = get_ticker_info_safe(ticker)
+
+            if not stock or not info:
+                print(f"[Analysis] Failed to get data for {ticker}")
+                return {"error": f"無法獲取 '{ticker}' 的資料。\n可能原因：\n• Yahoo Finance暫時無法訪問\n• 股票代號錯誤\n• 網路連接問題"}
+
+            # Check if info is valid
+            if len(info) < 5:
+                print(f"[Analysis] Insufficient data for {ticker}")
+                return {"error": f"'{ticker}' 資料不完整，可能已下市或代號錯誤"}
+
+            if not info.get("regularMarketPrice") and not info.get("currentPrice"):
+                print(f"[Analysis] No price data for {ticker}")
+                return {"error": f"'{ticker}' 無價格資料，可能已停牌或下市"}
+
+            name = info.get("longName") or info.get("shortName") or ticker
+            print(f"[Analysis] Successfully got data for: {name}")
         price = safe_val(info.get("currentPrice")) or safe_val(info.get("regularMarketPrice"))
         currency = info.get("currency", "USD")
         sector = info.get("sector", "N/A")
@@ -298,31 +369,34 @@ def get_stock_analysis(ticker: str):
         if price and prev_close:
             change_pct = round((price - prev_close) / prev_close * 100, 2)
 
-        try:
-            hist = stock.history(period="3mo")
-            if not hist.empty:
-                price_history = [round(float(v), 2) for v in hist["Close"].tolist()]
-                dates_history = [d.strftime("%Y-%m-%d") for d in hist.index.tolist()]
-            else:
-                price_history, dates_history = [], []
-        except Exception:
-            price_history, dates_history = [], []
+        # 歷史資料（只在有 stock object 時獲取）
+        price_history, dates_history = [], []
+        if stock:
+            try:
+                hist = stock.history(period="3mo")
+                if not hist.empty:
+                    price_history = [round(float(v), 2) for v in hist["Close"].tolist()]
+                    dates_history = [d.strftime("%Y-%m-%d") for d in hist.index.tolist()]
+            except Exception as e:
+                print(f"[Analysis] Could not get history: {e}")
 
-        try:
-            financials = stock.financials
-            earnings_data = []
-            if financials is not None and not financials.empty:
-                for idx in financials.index:
-                    if "Net Income" in str(idx):
-                        row = financials.loc[idx]
-                        earnings_data = sorted(
-                            [(str(col.year), round(float(val) / 1e9, 2))
-                             for col, val in row.items() if pd.notna(val)],
-                            key=lambda x: x[0]
-                        )
-                        break
-        except Exception:
-            earnings_data = []
+        # 財務資料（只在有 stock object 時獲取）
+        earnings_data = []
+        if stock:
+            try:
+                financials = stock.financials
+                if financials is not None and not financials.empty:
+                    for idx in financials.index:
+                        if "Net Income" in str(idx):
+                            row = financials.loc[idx]
+                            earnings_data = sorted(
+                                [(str(col.year), round(float(val) / 1e9, 2))
+                                 for col, val in row.items() if pd.notna(val)],
+                                key=lambda x: x[0]
+                            )
+                            break
+            except Exception as e:
+                print(f"[Analysis] Could not get financials: {e}")
 
         buffett_score, breakdown = score_stock(info)
 

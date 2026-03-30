@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股百強 · 巴菲特選股系統</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --card: #111827;
+    --card2: #1a2235;
+    --border: #1e293b;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --accent: #f59e0b;
+    --green: #10b981;
+    --red: #ef4444;
+    --blue: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  /* NAV */
+  .nav { background: #0d1117; border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; gap: 0; }
+  .nav-logo { display: flex; align-items: center; gap: 10px; padding: 16px 0; margin-right: 32px; text-decoration: none; color: var(--accent); font-weight: 700; font-size: 1rem; }
+  .nav-logo span { font-size: 1.4rem; }
+  .nav-tab { padding: 18px 20px; color: var(--text2); text-decoration: none; font-size: 0.9rem; border-bottom: 3px solid transparent; transition: all 0.2s; cursor: pointer; }
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* HERO */
+  .hero { background: linear-gradient(135deg, #0a0e1a 0%, #0f172a 60%, #1a1000 100%); padding: 32px; border-bottom: 1px solid var(--border); }
+  .hero-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .hero-left h1 { font-size: 1.6rem; font-weight: 800; color: var(--accent); }
+  .hero-left p { color: var(--text2); font-size: 0.85rem; margin-top: 6px; }
+  .hero-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .meta-badge { background: var(--card); border: 1px solid var(--border); padding: 8px 16px; border-radius: 10px; font-size: 0.8rem; }
+  .meta-badge .label { color: var(--text2); }
+  .meta-badge .val { color: var(--text); font-weight: 600; margin-top: 2px; }
+  .refresh-btn { background: linear-gradient(135deg, var(--accent), #d97706); color: #000; border: none; padding: 10px 20px; border-radius: 10px; font-size: 0.85rem; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
+  .refresh-btn:hover { opacity: 0.85; }
+  .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* PROGRESS */
+  .progress-bar-wrap { height: 3px; background: var(--border); position: relative; overflow: hidden; display: none; }
+  .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #fbbf24); transition: width 0.4s ease; }
+  .progress-info { padding: 10px 32px; background: rgba(245,158,11,0.06); border-bottom: 1px solid rgba(245,158,11,0.15); font-size: 0.82rem; color: var(--accent); display: none; }
+
+  /* FILTER BAR */
+  .filter-bar { padding: 16px 32px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .filter-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; outline: none; transition: border-color 0.2s; min-width: 200px; }
+  .filter-input:focus { border-color: var(--accent); }
+  .filter-input::placeholder { color: var(--text2); }
+  .filter-label { font-size: 0.82rem; color: var(--text2); }
+  .grade-filter { display: flex; gap: 6px; }
+  .grade-btn { background: var(--bg); border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .grade-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .grade-btn.active { background: var(--accent); border-color: var(--accent); color: #000; }
+  .signal-filter { display: flex; gap: 6px; }
+  .sort-select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 0.82rem; outline: none; cursor: pointer; }
+  .count-info { margin-left: auto; font-size: 0.82rem; color: var(--text2); }
+
+  /* TABLE */
+  .table-wrap { padding: 24px 32px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  thead th { text-align: left; padding: 10px 12px; color: var(--text2); font-size: 0.78rem; font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+  thead th:hover { color: var(--accent); }
+  thead th .sort-icon { opacity: 0.4; margin-left: 4px; }
+  thead th.sorted .sort-icon { opacity: 1; color: var(--accent); }
+  tbody tr { border-bottom: 1px solid rgba(30,41,59,0.6); transition: background 0.15s; cursor: pointer; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  tbody td { padding: 12px 12px; vertical-align: middle; white-space: nowrap; }
+
+  .rank-cell { font-size: 0.8rem; color: var(--text2); font-weight: 600; }
+  .rank-top { color: var(--accent); font-weight: 800; }
+  .rank-medal { font-size: 1rem; }
+
+  .ticker-code { font-size: 0.78rem; color: var(--text2); }
+  .ticker-name { font-weight: 600; font-size: 0.88rem; }
+
+  .score-pill { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; font-size: 0.9rem; font-weight: 800; }
+  .grade-pill { font-size: 0.72rem; font-weight: 700; padding: 3px 9px; border-radius: 12px; }
+  .price-cell { font-weight: 700; }
+  .change-up { color: var(--green); font-size: 0.82rem; }
+  .change-down { color: var(--red); font-size: 0.82rem; }
+  .na { color: var(--text2); font-size: 0.8rem; }
+  .sector-badge { background: rgba(59,130,246,0.1); color: #93c5fd; padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; }
+
+  .score-bar-wrap { width: 80px; height: 6px; background: rgba(255,255,255,0.07); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 6px; }
+  .score-bar-fill { height: 100%; border-radius: 3px; }
+
+  /* EMPTY / LOADING */
+  .empty-state { text-align: center; padding: 80px 32px; color: var(--text2); }
+  .empty-icon { font-size: 3rem; margin-bottom: 16px; }
+
+  /* STATS SUMMARY */
+  .stats-summary { padding: 0 32px 16px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 20px; min-width: 140px; }
+  .summary-label { font-size: 0.75rem; color: var(--text2); margin-bottom: 6px; }
+  .summary-val { font-size: 1.2rem; font-weight: 800; }
+
+  /* MODAL */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: #111827; border: 1px solid var(--border); border-radius: 16px; padding: 28px; max-width: 680px; width: 90%; max-height: 88vh; overflow-y: auto; }
+  .modal-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 20px; }
+  .modal-title { font-size: 1.2rem; font-weight: 700; }
+  .modal-close { background: none; border: none; color: var(--text2); font-size: 1.4rem; cursor: pointer; line-height: 1; }
+  .modal-close:hover { color: var(--text); }
+  .breakdown-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 0.83rem; }
+  .breakdown-label { width: 120px; color: var(--text2); flex-shrink: 0; }
+  .breakdown-bar-wrap { flex: 1; height: 7px; background: rgba(255,255,255,0.07); border-radius: 4px; overflow: hidden; }
+  .breakdown-bar { height: 100%; border-radius: 4px; }
+  .breakdown-value { width: 65px; text-align: right; font-weight: 600; flex-shrink: 0; }
+  .breakdown-pts { width: 45px; text-align: right; color: var(--text2); font-size: 0.78rem; flex-shrink: 0; }
+  .check { color: var(--green); width: 16px; flex-shrink: 0; }
+  .cross { color: var(--red); width: 16px; flex-shrink: 0; }
+  /* Valuation in modal */
+  .val-ruler { height: 28px; border-radius: 6px; background: linear-gradient(90deg, #00c853 0%, #64dd17 20%, #ffd600 40%, #ff6d00 65%, #d50000 100%); position: relative; }
+  .val-ruler-marker { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 6px rgba(255,255,255,0.8); }
+  .val-zones-mini { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .val-zone-mini { padding: 10px 12px; border-radius: 8px; border: 1px solid; }
+  .val-zone-mini .lbl { font-size: 0.7rem; margin-bottom: 3px; }
+  .val-zone-mini .prc { font-size: 1rem; font-weight: 800; }
+  .signal-pill { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 3px 10px; border-radius: 10px; }
+
+  footer { text-align: center; padding: 20px; color: var(--text2); font-size: 0.75rem; border-top: 1px solid var(--border); margin-top: 20px; }
+
+  @media (max-width: 768px) {
+    .nav { padding: 0 16px; }
+    .hero, .filter-bar, .table-wrap, .stats-summary { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <a class="nav-logo" href="/"><span>🏦</span> 巴菲特選股系統</a>
+  <a class="nav-tab" href="/">主頁分析</a>
+  <a class="nav-tab active" href="/tw-top100">台股百強</a>
+</nav>
+
+<!-- PROGRESS -->
+<div class="progress-bar-wrap" id="progress-bar-wrap">
+  <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+</div>
+<div class="progress-info" id="progress-info">⚙️ <span id="progress-msg"></span></div>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-row">
+    <div class="hero-left">
+      <h1>🇹🇼 台股巴菲特百強榜</h1>
+      <p>每日自動從台股1,000+上市公司中，依巴菲特8大選股標準評分，篩選出前100名</p>
+    </div>
+    <div class="hero-right">
+      <div class="meta-badge">
+        <div class="label">最後更新</div>
+        <div class="val" id="last-updated">載入中...</div>
+      </div>
+      <div class="meta-badge">
+        <div class="label">評分股票數</div>
+        <div class="val" id="total-scored">-</div>
+      </div>
+      <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()">🔄 立即更新</button>
+    </div>
+  </div>
+</div>
+
+<!-- STATS SUMMARY -->
+<div class="stats-summary" id="stats-summary" style="padding-top:20px">
+  <div class="summary-card"><div class="summary-label">A級強力買進</div><div class="summary-val" id="count-a" style="color:#00c853">-</div></div>
+  <div class="summary-card"><div class="summary-label">B級值得關注</div><div class="summary-val" id="count-b" style="color:#64dd17">-</div></div>
+  <div class="summary-card"><div class="summary-label">C級謹慎評估</div><div class="summary-val" id="count-c" style="color:#ffd600">-</div></div>
+  <div class="summary-card"><div class="summary-label">平均巴菲特分數</div><div class="summary-val" id="avg-score" style="color:var(--accent)">-</div></div>
+  <div class="summary-card"><div class="summary-label">最高分</div><div class="summary-val" id="max-score" style="color:var(--accent)">-</div></div>
+</div>
+
+<!-- FILTER BAR -->
+<div class="filter-bar">
+  <input class="filter-input" id="search-filter" placeholder="🔍 搜尋股票代號或名稱..." oninput="applyFilters()">
+  <span class="filter-label">評級：</span>
+  <div class="grade-filter">
+    <button class="grade-btn active" data-grade="ALL" onclick="setGradeFilter(this)">全部</button>
+    <button class="grade-btn" data-grade="A" onclick="setGradeFilter(this)" style="color:#00c853;border-color:#00c853">A</button>
+    <button class="grade-btn" data-grade="B" onclick="setGradeFilter(this)" style="color:#64dd17;border-color:#64dd17">B</button>
+    <button class="grade-btn" data-grade="C" onclick="setGradeFilter(this)" style="color:#ffd600;border-color:#ffd600">C</button>
+  </div>
+  <span class="filter-label">買賣訊號：</span>
+  <div class="signal-filter">
+    <button class="grade-btn active" data-signal="ALL" onclick="setSignalFilter(this)">全部</button>
+    <button class="grade-btn" data-signal="強力買入" onclick="setSignalFilter(this)" style="color:#00c853;border-color:#00c853">強力買入</button>
+    <button class="grade-btn" data-signal="買入區間" onclick="setSignalFilter(this)" style="color:#64dd17;border-color:#64dd17">買入區間</button>
+    <button class="grade-btn" data-signal="合理持有" onclick="setSignalFilter(this)" style="color:#ffd600;border-color:#ffd600">持有</button>
+  </div>
+  <span class="filter-label">排序：</span>
+  <select class="sort-select" id="sort-select" onchange="applyFilters()">
+    <option value="buffett_score">巴菲特分數 ↓</option>
+    <option value="pe">本益比 ↑</option>
+    <option value="roe">ROE ↓</option>
+    <option value="div_yield">股息殖利率 ↓</option>
+    <option value="market_cap">市值 ↓</option>
+  </select>
+  <span class="count-info" id="count-info"></span>
+</div>
+
+<!-- TABLE -->
+<div class="table-wrap">
+  <div id="loading-state" class="empty-state">
+    <div class="empty-icon">⏳</div>
+    <div>正在載入台股評分資料...</div>
+  </div>
+  <table id="main-table" style="display:none">
+    <thead>
+      <tr>
+        <th>排名</th>
+        <th>股票</th>
+        <th onclick="sortTable('buffett_score')" title="巴菲特評分">分數 <span class="sort-icon sorted" id="sort-buffett_score">↓</span></th>
+        <th>評級</th>
+        <th>買賣訊號</th>
+        <th onclick="sortTable('price')">現價 <span class="sort-icon" id="sort-price">↕</span></th>
+        <th>漲跌</th>
+        <th>買入價</th>
+        <th>合理價</th>
+        <th>賣出價</th>
+        <th onclick="sortTable('pe')">P/E <span class="sort-icon" id="sort-pe">↕</span></th>
+        <th onclick="sortTable('roe')">ROE <span class="sort-icon" id="sort-roe">↕</span></th>
+        <th onclick="sortTable('div_yield')">殖利率 <span class="sort-icon" id="sort-div_yield">↕</span></th>
+        <th onclick="sortTable('market_cap')">市值(億) <span class="sort-icon" id="sort-market_cap">↕</span></th>
+        <th>產業</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+  <div id="empty-state" class="empty-state" style="display:none">
+    <div class="empty-icon">🔍</div>
+    <div>沒有符合條件的股票</div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modal-title"></div>
+        <div style="color:var(--text2);font-size:0.82rem;margin-top:4px" id="modal-sub"></div>
+      </div>
+      <button class="modal-close" onclick="closeModalDirect()">×</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<footer>
+  ⚠️ 本系統僅供投資教育參考，不構成任何投資建議。投資有風險，請自行評估。<br>
+  資料來源：台灣證券交易所 TWSE Open API + Yahoo Finance｜評分基於巴菲特選股原則
+</footer>
+
+<script>
+let allData = [];
+let filteredData = [];
+let currentSort = 'buffett_score';
+let currentGrade = 'ALL';
+let currentSignal = 'ALL';
+let sortAsc = false;
+let pollTimer = null;
+
+// ── Init ─────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadData();
+});
+
+async function loadData() {
+  try {
+    const res = await fetch('/api/tw-top100');
+    const json = await res.json();
+
+    if (json.running) {
+      showProgress(json.status);
+      startPolling();
+    } else {
+      stopPolling();
+      hideProgress();
+    }
+
+    if (json.data && json.data.length > 0) {
+      allData = json.data;
+      updateMeta(json);
+      applyFilters();
+      document.getElementById('loading-state').style.display = 'none';
+      document.getElementById('main-table').style.display = 'table';
+    } else if (!json.running) {
+      document.getElementById('loading-state').innerHTML =
+        '<div class="empty-icon">📭</div><div>尚無資料，請點擊「立即更新」開始評分</div>';
+    }
+  } catch(e) {
+    document.getElementById('loading-state').innerHTML =
+      '<div class="empty-icon">⚠️</div><div>無法載入資料，請確認伺服器運行中</div>';
+  }
+}
+
+function updateMeta(json) {
+  document.getElementById('last-updated').textContent =
+    json.timestamp ? new Date(json.timestamp).toLocaleString('zh-TW') : '未知';
+  document.getElementById('total-scored').textContent = (json.total_screened || 0) + ' 檔';
+
+  const data = json.data || [];
+  const countA = data.filter(d => d.grade === 'A').length;
+  const countB = data.filter(d => d.grade === 'B').length;
+  const countC = data.filter(d => d.grade === 'C').length;
+  const avg = data.length ? Math.round(data.reduce((s,d) => s + d.buffett_score, 0) / data.length) : 0;
+  const max = data.length ? Math.max(...data.map(d => d.buffett_score)) : 0;
+
+  document.getElementById('count-a').textContent = countA;
+  document.getElementById('count-b').textContent = countB;
+  document.getElementById('count-c').textContent = countC;
+  document.getElementById('avg-score').textContent = avg;
+  document.getElementById('max-score').textContent = max;
+}
+
+// ── Filters & Sort ────────────────────────────────────────
+function setGradeFilter(btn) {
+  btn.closest('.grade-filter').querySelectorAll('.grade-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentGrade = btn.dataset.grade;
+  applyFilters();
+}
+
+function setSignalFilter(btn) {
+  btn.closest('.signal-filter').querySelectorAll('.grade-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentSignal = btn.dataset.signal;
+  applyFilters();
+}
+
+function sortTable(col) {
+  if (currentSort === col) {
+    sortAsc = !sortAsc;
+  } else {
+    currentSort = col;
+    // Default: score/roe/div_yield/gross_margin/market_cap descending, pe ascending
+    sortAsc = col === 'pe';
+  }
+  document.querySelectorAll('.sort-icon').forEach(el => {
+    el.textContent = '↕';
+    el.classList.remove('sorted');
+  });
+  const icon = document.getElementById(`sort-${col}`);
+  if (icon) {
+    icon.textContent = sortAsc ? '↑' : '↓';
+    icon.classList.add('sorted');
+  }
+  applyFilters();
+}
+
+function applyFilters() {
+  const q = document.getElementById('search-filter').value.toLowerCase();
+  const sortKey = document.getElementById('sort-select').value;
+
+  filteredData = allData.filter(d => {
+    const matchGrade = currentGrade === 'ALL' || d.grade === currentGrade;
+    const matchQ = !q || d.code.toLowerCase().includes(q) || d.name.toLowerCase().includes(q) || (d.long_name||'').toLowerCase().includes(q);
+    const matchSignal = currentSignal === 'ALL' || (d.valuation && d.valuation.signal === currentSignal);
+    return matchGrade && matchQ && matchSignal;
+  });
+
+  // Sort
+  const sk = sortAsc ? 1 : -1;
+  filteredData.sort((a, b) => {
+    const av = a[sortKey] ?? (sortAsc ? Infinity : -Infinity);
+    const bv = b[sortKey] ?? (sortAsc ? Infinity : -Infinity);
+    return (av - bv) * sk;
+  });
+
+  document.getElementById('count-info').textContent = `顯示 ${filteredData.length} 檔`;
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  const table = document.getElementById('main-table');
+  const emptyState = document.getElementById('empty-state');
+
+  if (filteredData.length === 0) {
+    table.style.display = 'none';
+    emptyState.style.display = 'block';
+    return;
+  }
+  table.style.display = 'table';
+  emptyState.style.display = 'none';
+
+  tbody.innerHTML = filteredData.map((d, idx) => {
+    const rank = d.rank || (idx + 1);
+    let rankHtml;
+    if (rank === 1) rankHtml = '<span class="rank-medal">🥇</span>';
+    else if (rank === 2) rankHtml = '<span class="rank-medal">🥈</span>';
+    else if (rank === 3) rankHtml = '<span class="rank-medal">🥉</span>';
+    else rankHtml = `<span class="rank-top">#${rank}</span>`;
+
+    const scoreBarColor = d.grade_color || '#f59e0b';
+    const changeHtml = d.change_pct != null
+      ? `<span class="${d.change_pct >= 0 ? 'change-up' : 'change-down'}">${d.change_pct >= 0 ? '+' : ''}${d.change_pct.toFixed(2)}%</span>`
+      : '<span class="na">-</span>';
+
+    const fmt = (v, suffix='', dp=1) => v != null ? `${parseFloat(v).toFixed(dp)}${suffix}` : '<span class="na">-</span>';
+
+    // Valuation cells
+    const v = d.valuation;
+    const signalHtml = v
+      ? `<span class="signal-pill" style="background:${v.signal_color}22;color:${v.signal_color}">${v.signal}</span>`
+      : '<span class="na">-</span>';
+    const buyPriceHtml  = v ? `<span style="color:#64dd17;font-weight:600">${v.buy_zone}</span>` : '<span class="na">-</span>';
+    const fairPriceHtml = v ? `<span style="color:#f59e0b;font-weight:600">${v.fair_value}</span>` : '<span class="na">-</span>';
+    const sellPriceHtml = v ? `<span style="color:#ff6d00;font-weight:600">${v.sell_zone}</span>` : '<span class="na">-</span>';
+
+    return `<tr onclick="showDetail(${JSON.stringify(d).replace(/"/g,'&quot;')})">
+      <td class="rank-cell">${rankHtml}</td>
+      <td>
+        <div class="ticker-name">${d.name}</div>
+        <div class="ticker-code">${d.code}</div>
+      </td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="score-pill" style="background:${scoreBarColor}22;color:${scoreBarColor}">${d.buffett_score}</div>
+          <div class="score-bar-wrap"><div class="score-bar-fill" style="width:${d.buffett_score}%;background:${scoreBarColor}"></div></div>
+        </div>
+      </td>
+      <td><span class="grade-pill" style="background:${scoreBarColor}22;color:${scoreBarColor}">${d.grade} ${d.grade_label}</span></td>
+      <td>${signalHtml}</td>
+      <td class="price-cell">${fmt(d.price, '', 2)}</td>
+      <td>${changeHtml}</td>
+      <td>${buyPriceHtml}</td>
+      <td>${fairPriceHtml}</td>
+      <td>${sellPriceHtml}</td>
+      <td>${fmt(d.pe, 'x')}</td>
+      <td>${d.roe != null ? fmt(d.roe, '%') : '<span class="na">-</span>'}</td>
+      <td>${d.div_yield != null ? fmt(d.div_yield, '%', 2) : '<span class="na">-</span>'}</td>
+      <td>${d.market_cap != null ? fmt(d.market_cap, '', 0) : '<span class="na">-</span>'}</td>
+      <td><span class="sector-badge">${d.sector || '-'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Detail Modal ──────────────────────────────────────────
+function showDetail(d) {
+  document.getElementById('modal-title').textContent = `${d.name} (${d.code})`;
+  document.getElementById('modal-sub').textContent = `${d.sector} / ${d.industry} · 現價 TWD ${d.price || 'N/A'}`;
+
+  const bd = d.breakdown || {};
+  const breakdownHtml = Object.entries(bd).map(([key, val]) => {
+    const pct = Math.round((val.score / val.max) * 100);
+    const barColor = pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
+    const icon = val.pass ? '<span class="check">✓</span>' : '<span class="cross">✗</span>';
+    return `<div class="breakdown-item">${icon}
+      <span class="breakdown-label">${key}</span>
+      <div class="breakdown-bar-wrap"><div class="breakdown-bar" style="width:${pct}%;background:${barColor}"></div></div>
+      <span class="breakdown-value">${val.label}</span>
+      <span class="breakdown-pts">${val.score}/${val.max}</span>
+    </div>`;
+  }).join('');
+
+  // Valuation section
+  const v = d.valuation;
+  let valHtml = '';
+  if (v) {
+    let markerPct = 50;
+    if (d.price && v.fair_value) {
+      const ratio = d.price / v.fair_value;
+      if (ratio <= 0.70) markerPct = Math.max(0, ratio / 0.70 * 20);
+      else if (ratio <= 0.85) markerPct = 20 + (ratio - 0.70) / 0.15 * 20;
+      else if (ratio <= 1.00) markerPct = 40 + (ratio - 0.85) / 0.15 * 10;
+      else if (ratio <= 1.20) markerPct = 50 + (ratio - 1.00) / 0.20 * 15;
+      else if (ratio <= 1.40) markerPct = 65 + (ratio - 1.20) / 0.20 * 20;
+      else markerPct = Math.min(100, 85 + (ratio - 1.40) / 0.30 * 15);
+    }
+    valHtml = `
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid #1e293b">
+      <div style="font-size:0.9rem;font-weight:700;color:#f59e0b;margin-bottom:12px">💡 巴菲特買賣價格區間</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span class="signal-pill" style="background:${v.signal_color}22;color:${v.signal_color}">${v.signal}</span>
+        <span style="font-size:0.8rem;color:#94a3b8">現價為合理價值的 <strong style="color:#e2e8f0">${v.price_to_fair != null ? v.price_to_fair + '%' : 'N/A'}</strong></span>
+      </div>
+      <div class="val-ruler"><div class="val-ruler-marker" style="left:${markerPct}%"></div></div>
+      <div class="val-zones-mini">
+        <div class="val-zone-mini" style="border-color:#00c85344;background:#00c85311">
+          <div class="lbl" style="color:#00c853">🟢 強力買入</div>
+          <div class="prc" style="color:#00c853">≤ ${v.buy_strong}</div>
+        </div>
+        <div class="val-zone-mini" style="border-color:#64dd1744;background:#64dd1711">
+          <div class="lbl" style="color:#64dd17">🟡 買入區間</div>
+          <div class="prc" style="color:#64dd17">≤ ${v.buy_zone}</div>
+        </div>
+        <div class="val-zone-mini" style="border-color:#f59e0b44;background:#f59e0b11">
+          <div class="lbl" style="color:#f59e0b">⚖️ 合理價值</div>
+          <div class="prc" style="color:#f59e0b">${v.fair_value}</div>
+        </div>
+        <div class="val-zone-mini" style="border-color:#ff6d0044;background:#ff6d0011">
+          <div class="lbl" style="color:#ff6d00">🔴 考慮賣出</div>
+          <div class="prc" style="color:#ff6d00">≥ ${v.sell_zone}</div>
+        </div>
+        <div class="val-zone-mini" style="border-color:#d5000044;background:#d5000011">
+          <div class="lbl" style="color:#d50000">⛔ 強力賣出</div>
+          <div class="prc" style="color:#d50000">≥ ${v.sell_strong}</div>
+        </div>
+        <div class="val-zone-mini" style="border-color:#1e293b;background:#0a0e1a">
+          <div class="lbl" style="color:#64748b">計算依據</div>
+          <div style="font-size:0.75rem;color:#94a3b8">EPS ${v.eps} × P/E ${v.fair_pe}x<br>成長 ${v.growth_rate}%</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const scoreColor = d.grade_color || '#f59e0b';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px;padding:14px;background:${scoreColor}11;border-radius:12px;border:1px solid ${scoreColor}33">
+      <div style="font-size:2.4rem;font-weight:800;color:${scoreColor}">${d.buffett_score}</div>
+      <div>
+        <div style="font-size:1rem;font-weight:700;color:${scoreColor}">${d.grade} 級 · ${d.grade_label}</div>
+        <div style="font-size:0.78rem;color:#94a3b8;margin-top:3px">巴菲特評分 (滿分100)｜現價 TWD ${d.price || 'N/A'}</div>
+      </div>
+    </div>
+    <div style="font-size:0.85rem;font-weight:600;margin-bottom:12px;color:#94a3b8">各項指標評分</div>
+    ${breakdownHtml}
+    ${valHtml}
+    <div style="margin-top:16px;text-align:center">
+      <a href="/" onclick="sessionStorage.setItem('analyze','${d.code}.TW');return true;"
+         style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;padding:10px 24px;border-radius:10px;text-decoration:none;font-weight:700;font-size:0.85rem">
+        🔍 查看完整分析報告
+      </a>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModalDirect();
+}
+function closeModalDirect() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+// ── Refresh ───────────────────────────────────────────────
+async function triggerRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  btn.textContent = '更新中...';
+  try {
+    await fetch('/api/tw-top100/refresh', { method: 'POST' });
+    startPolling();
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '🔄 立即更新';
+    alert('無法觸發更新，請確認伺服器運行中');
+  }
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(pollStatus, 3000);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = false;
+  btn.textContent = '🔄 立即更新';
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch('/api/tw-top100/status');
+    const json = await res.json();
+
+    if (json.running) {
+      showProgress(json);
+    } else {
+      stopPolling();
+      hideProgress();
+      // Reload data
+      loadData();
+    }
+  } catch(e) { /* ignore */ }
+}
+
+function showProgress(status) {
+  document.getElementById('progress-bar-wrap').style.display = 'block';
+  document.getElementById('progress-info').style.display = 'block';
+  const total = status.total || 200;
+  const prog = status.progress || 0;
+  const pct = total > 0 ? Math.round(prog / total * 100) : 0;
+  document.getElementById('progress-bar-fill').style.width = pct + '%';
+  document.getElementById('progress-msg').textContent = status.message || '處理中...';
+}
+
+function hideProgress() {
+  document.getElementById('progress-bar-wrap').style.display = 'none';
+  document.getElementById('progress-info').style.display = 'none';
+}
+</script>
+</body>
+</html>

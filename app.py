@@ -6,34 +6,71 @@ from datetime import datetime, timedelta
 import traceback
 import tw_screener
 import time
+import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 app = Flask(__name__)
 
-# Configure yfinance to be more reliable
-yf.pdr_override()
+# Configure session with retries for yfinance
+def create_session():
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    return session
+
+# Create global session
+_session = create_session()
 
 
-def get_ticker_info_safe(ticker: str, max_retries=3):
+def get_ticker_info_safe(ticker: str, max_retries=2):
     """Safely get ticker info with retries"""
     for attempt in range(max_retries):
         try:
-            stock = yf.Ticker(ticker)
+            print(f"[get_ticker_info_safe] Attempt {attempt + 1} for {ticker}")
+
+            # Use custom session
+            stock = yf.Ticker(ticker, session=_session)
+
+            # Try to get fast_info first (lighter request)
+            try:
+                _ = stock.fast_info
+                print(f"[get_ticker_info_safe] Fast info available for {ticker}")
+            except:
+                print(f"[get_ticker_info_safe] Fast info not available for {ticker}")
+
+            # Get full info
             info = stock.info
 
+            print(f"[get_ticker_info_safe] Info keys: {list(info.keys())[:10] if info else 'None'}")
+
             # Validate info
-            if not info or not isinstance(info, dict):
+            if not info or not isinstance(info, dict) or len(info) < 3:
+                print(f"[get_ticker_info_safe] Invalid info for {ticker}: dict={isinstance(info, dict)}, len={len(info) if info else 0}")
                 if attempt < max_retries - 1:
-                    time.sleep(1)
+                    time.sleep(2)
                     continue
                 return None, None
 
             return stock, info
+
         except Exception as e:
-            print(f"[get_ticker_info_safe] Attempt {attempt + 1} failed for {ticker}: {e}")
+            print(f"[get_ticker_info_safe] Attempt {attempt + 1} failed for {ticker}: {type(e).__name__}: {e}")
+            traceback.print_exc()
             if attempt < max_retries - 1:
-                time.sleep(2)  # Wait before retry
+                time.sleep(3)
             else:
                 return None, None
+
     return None, None
 
 
@@ -364,6 +401,36 @@ def get_stock_analysis(ticker: str):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/health")
+def health():
+    """Health check and diagnostics endpoint"""
+    try:
+        import sys
+        import platform
+
+        # Test yfinance with a simple ticker
+        test_ticker = "AAPL"
+        stock, info = get_ticker_info_safe(test_ticker, max_retries=1)
+
+        return jsonify({
+            "status": "ok",
+            "python_version": sys.version,
+            "platform": platform.platform(),
+            "yfinance_test": {
+                "ticker": test_ticker,
+                "success": stock is not None and info is not None,
+                "info_keys": len(info) if info else 0
+            },
+            "session_configured": _session is not None
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
 
 
 @app.route("/api/analyze/<ticker>")

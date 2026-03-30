@@ -3,6 +3,8 @@
 每日自動抓取 TWSE 所有上市股票，依巴菲特8大標準評分並排名前100名
 """
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 import yfinance as yf
 import pandas as pd
 import json
@@ -26,6 +28,24 @@ _status = {
     "message": "閒置中",
     "started_at": None,
 }
+
+# Create session with retries for yfinance
+def _create_yf_session():
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    return session
+
+_yf_session = _create_yf_session()
 
 
 # ── Scoring logic (same weights as main app) ──────────────────────────
@@ -272,7 +292,8 @@ def fetch_single_stock(stock: dict):
     """Fetch yfinance info and score one stock. Returns result dict or None."""
     ticker_sym = f"{stock['code']}.TW"
     try:
-        t = yf.Ticker(ticker_sym)
+        # Use custom session
+        t = yf.Ticker(ticker_sym, session=_yf_session)
         info = t.info
 
         # Validate info

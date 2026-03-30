@@ -274,6 +274,11 @@ def fetch_single_stock(stock: dict):
     try:
         t = yf.Ticker(ticker_sym)
         info = t.info
+
+        # Validate info
+        if not info or not isinstance(info, dict) or len(info) < 3:
+            return None
+
         price = safe_val(info.get("currentPrice")) or safe_val(info.get("regularMarketPrice"))
         if price is None:
             return None

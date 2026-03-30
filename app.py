@@ -5,8 +5,36 @@ import json
 from datetime import datetime, timedelta
 import traceback
 import tw_screener
+import time
 
 app = Flask(__name__)
+
+# Configure yfinance to be more reliable
+yf.pdr_override()
+
+
+def get_ticker_info_safe(ticker: str, max_retries=3):
+    """Safely get ticker info with retries"""
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+
+            # Validate info
+            if not info or not isinstance(info, dict):
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+                return None, None
+
+            return stock, info
+        except Exception as e:
+            print(f"[get_ticker_info_safe] Attempt {attempt + 1} failed for {ticker}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)  # Wait before retry
+            else:
+                return None, None
+    return None, None
 
 
 def safe_val(val, default=None):
@@ -200,14 +228,26 @@ def calculate_buffett_valuation(info: dict, current_price: float):
 
 def get_stock_analysis(ticker: str):
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        print(f"[Analysis] Starting analysis for: {ticker}")
 
-        if not info or (info.get("regularMarketPrice") is None and info.get("currentPrice") is None):
-            if not info.get("symbol"):
-                return {"error": f"找不到股票代號 '{ticker}'，請確認輸入是否正確"}
+        # Use safe getter with retries
+        stock, info = get_ticker_info_safe(ticker)
+
+        if not stock or not info:
+            print(f"[Analysis] Failed to get data for {ticker}")
+            return {"error": f"無法獲取 '{ticker}' 的資料。請確認：\n• 台股代號需加 .TW（例：2330.TW）\n• 美股直接輸入代號（例：AAPL）\n• 代號是否正確"}
+
+        # Check if info is valid
+        if len(info) < 5:
+            print(f"[Analysis] Insufficient data for {ticker}")
+            return {"error": f"'{ticker}' 資料不完整，可能已下市或代號錯誤"}
+
+        if not info.get("regularMarketPrice") and not info.get("currentPrice"):
+            print(f"[Analysis] No price data for {ticker}")
+            return {"error": f"'{ticker}' 無價格資料，可能已停牌或下市"}
 
         name = info.get("longName") or info.get("shortName") or ticker
+        print(f"[Analysis] Successfully got data for: {name}")
         price = safe_val(info.get("currentPrice")) or safe_val(info.get("regularMarketPrice"))
         currency = info.get("currency", "USD")
         sector = info.get("sector", "N/A")
@@ -308,8 +348,17 @@ def get_stock_analysis(ticker: str):
             "52w_low": safe_val(info.get("fiftyTwoWeekLow")),
         }
     except Exception as e:
+        error_msg = str(e)
+        print(f"[Analysis] Exception for {ticker}: {error_msg}")
         traceback.print_exc()
-        return {"error": f"分析時發生錯誤：{str(e)}"}
+
+        # Provide more helpful error messages
+        if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+            return {"error": f"無法獲取 '{ticker}' 的資料。可能原因：\n1. 股票代號錯誤（台股請使用 .TW 結尾，如：2330.TW）\n2. Yahoo Finance 暫時無法回應\n3. 該股票已下市或停牌\n\n請稍後再試或確認代號是否正確。"}
+        elif "404" in error_msg or "Not Found" in error_msg:
+            return {"error": f"找不到股票代號 '{ticker}'，請確認輸入是否正確"}
+        else:
+            return {"error": f"分析時發生錯誤：{error_msg}"}
 
 
 @app.route("/")

@@ -337,33 +337,48 @@ def tw_top100():
 
 @app.route("/api/tw-top100")
 def api_tw_top100():
-    cache = tw_screener._load_cache()
-    status = tw_screener.get_status()
+    try:
+        cache = tw_screener._load_cache()
+        status = tw_screener.get_status()
 
-    if cache:
+        print(f"[API] tw-top100 request - cache exists: {cache is not None}, running: {status['running']}")
+
+        if cache:
+            return jsonify({
+                "data": cache.get("data", []),
+                "timestamp": cache.get("timestamp"),
+                "total_screened": cache.get("count", 0),
+                "is_fresh": tw_screener._cache_is_fresh(cache),
+                "running": status["running"],
+                "status": status,
+            })
+
         return jsonify({
-            "data": cache.get("data", []),
-            "timestamp": cache.get("timestamp"),
-            "total_screened": cache.get("count", 0),
-            "is_fresh": tw_screener._cache_is_fresh(cache),
+            "data": [],
+            "timestamp": None,
+            "total_screened": 0,
+            "is_fresh": False,
             "running": status["running"],
             "status": status,
         })
-
-    return jsonify({
-        "data": [],
-        "timestamp": None,
-        "total_screened": 0,
-        "is_fresh": False,
-        "running": status["running"],
-        "status": status,
-    })
+    except Exception as e:
+        print(f"[API] tw-top100 error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e), "data": []}), 500
 
 
 @app.route("/api/tw-top100/refresh", methods=["POST"])
 def api_tw_top100_refresh():
-    started = tw_screener.start_refresh_background()
-    return jsonify({"started": started, "message": "更新已開始" if started else "已在更新中"})
+    try:
+        print("[API] Refresh request received")
+        started = tw_screener.start_refresh_background()
+        message = "更新已開始" if started else "已在更新中"
+        print(f"[API] Refresh started: {started}")
+        return jsonify({"started": started, "message": message})
+    except Exception as e:
+        print(f"[API] Refresh error: {e}")
+        traceback.print_exc()
+        return jsonify({"started": False, "message": f"更新失敗：{str(e)}"}), 500
 
 
 @app.route("/api/tw-top100/status")

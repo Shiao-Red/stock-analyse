@@ -15,8 +15,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 CACHE_FILE = os.path.join(CACHE_DIR, "tw_top100.json")
 CACHE_MAX_AGE_HOURS = 24
-MAX_CANDIDATES = 200   # 取交易量最大的前N檔做完整評分
-MAX_WORKERS = 8        # 並行抓取線程數
+MAX_CANDIDATES = 50    # 雲端環境減少候選數量（原本200）
+MAX_WORKERS = 3        # 雲端環境減少並行數（原本8）
 
 _refresh_lock = threading.Lock()
 _status = {
@@ -339,63 +339,90 @@ def run_screening():
     """Main screening job. Returns list of top-100 results."""
     global _status
 
-    _status.update({"running": True, "progress": 0, "total": 0,
-                    "message": "正在取得台股清單...", "started_at": datetime.now().isoformat()})
+    try:
+        _status.update({"running": True, "progress": 0, "total": 0,
+                        "message": "正在取得台股清單...", "started_at": datetime.now().isoformat()})
 
-    # Step 1: Get all TWSE stocks
-    all_stocks = fetch_twse_base()
-    if not all_stocks:
-        _status.update({"running": False, "message": "無法取得台股清單"})
+        print("[tw_screener] Starting screening process...")
+
+        # Step 1: Get all TWSE stocks
+        all_stocks = fetch_twse_base()
+        if not all_stocks:
+            _status.update({"running": False, "message": "無法取得台股清單"})
+            print("[tw_screener] Failed to fetch TWSE stock list")
+            return []
+
+        print(f"[tw_screener] Fetched {len(all_stocks)} stocks from TWSE")
+
+        # Step 2: Pre-filter — top MAX_CANDIDATES by daily trade value (liquid, large)
+        all_stocks.sort(key=lambda s: s.get("trade_value", 0), reverse=True)
+        candidates = all_stocks[:MAX_CANDIDATES]
+
+        _status.update({"total": len(candidates), "message": f"開始評分 {len(candidates)} 檔候選股..."})
+        print(f"[tw_screener] Screening {len(candidates)} candidates...")
+
+        # Step 3: Parallel yfinance fetch + score
+        results = []
+        done = 0
+
+        def worker(stock):
+            nonlocal done
+            res = fetch_single_stock(stock)
+            done += 1
+            _status["progress"] = done
+            _status["message"] = f"評分中... ({done}/{len(candidates)}) {stock['code']} {stock.get('name','')}"
+            if done % 10 == 0:  # Log every 10 stocks
+                print(f"[tw_screener] Progress: {done}/{len(candidates)}")
+            return res
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(worker, s): s for s in candidates}
+            for future in as_completed(futures):
+                try:
+                    res = future.result(timeout=30)  # 30 second timeout per stock
+                    if res:
+                        results.append(res)
+                except Exception as e:
+                    print(f"[tw_screener] Worker error: {e}")
+                    continue
+
+        print(f"[tw_screener] Successfully scored {len(results)} stocks")
+
+        # Step 4: Sort by score, return top 100
+        results.sort(key=lambda x: x["buffett_score"], reverse=True)
+        top100 = results[:100]
+
+        # Add rank
+        for i, r in enumerate(top100, 1):
+            r["rank"] = i
+
+        _status.update({"running": False, "progress": len(candidates), "message": "評分完成"})
+        print(f"[tw_screener] Screening completed. Top 100 selected.")
+        return top100
+
+    except Exception as e:
+        print(f"[tw_screener] Fatal error in run_screening: {e}")
+        import traceback
+        traceback.print_exc()
+        _status.update({"running": False, "message": f"評分失敗：{str(e)}"})
         return []
-
-    # Step 2: Pre-filter — top MAX_CANDIDATES by daily trade value (liquid, large)
-    all_stocks.sort(key=lambda s: s.get("trade_value", 0), reverse=True)
-    candidates = all_stocks[:MAX_CANDIDATES]
-
-    _status.update({"total": len(candidates), "message": f"開始評分 {len(candidates)} 檔候選股..."})
-
-    # Step 3: Parallel yfinance fetch + score
-    results = []
-    done = 0
-
-    def worker(stock):
-        nonlocal done
-        res = fetch_single_stock(stock)
-        done += 1
-        _status["progress"] = done
-        _status["message"] = f"評分中... ({done}/{len(candidates)}) {stock['code']} {stock.get('name','')}"
-        return res
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(worker, s): s for s in candidates}
-        for future in as_completed(futures):
-            res = future.result()
-            if res:
-                results.append(res)
-
-    # Step 4: Sort by score, return top 100
-    results.sort(key=lambda x: x["buffett_score"], reverse=True)
-    top100 = results[:100]
-
-    # Add rank
-    for i, r in enumerate(top100, 1):
-        r["rank"] = i
-
-    _status.update({"running": False, "progress": len(candidates), "message": "評分完成"})
-    return top100
 
 
 # ── Cache management ─────────────────────────────────────────────────
 
 def _save_cache(data: list):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    payload = {
-        "timestamp": datetime.now().isoformat(),
-        "count": len(data),
-        "data": data,
-    }
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        payload = {
+            "timestamp": datetime.now().isoformat(),
+            "count": len(data),
+            "data": data,
+        }
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"[tw_screener] Cache saved: {len(data)} stocks")
+    except Exception as e:
+        print(f"[tw_screener] Failed to save cache: {e}")
 
 
 def _load_cache():
